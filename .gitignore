@@ -1,0 +1,11 @@
+.terraform/
+.terraform.*
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+*.swp
+*.swo
+*.swn
+*.swm
+node_modules/
+*.sqlite

@@ -5,5 +5,3 @@
 3. An EKS cluster was created using terraform
 4. A Helm Chart was created to deploy the app into k8s
 5. A GitHub Actions workflow was created to continuously deploy the app.
-
-Test
