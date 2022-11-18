@@ -1,0 +1,140 @@
+name: Maven Deploy and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        type: choice
+        description: Goal
+        required: true
+        options: 
+        - Deploy
+        - Release
+
+concurrency:
+  group: build-and-deploy
+
+jobs:
+  build:
+    name: "Maven ${{ github.event.inputs.goal }}"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2.3.4
+
+      - uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Get Github action IP
+        id: ip
+        uses: haythem/public-ip@v1.2
+
+      - name: Add Github Actions IP to Security group
+        run: |
+          aws ec2 authorize-security-group-ingress --group-id ${{ env.AWS_SG_ID }} --ip-permissions IpProtocol=tcp,FromPort=${{ env.AWS_SG_PORT }},ToPort=${{ env.AWS_SG_PORT }},IpRanges="[{CidrIp=${{ steps.ip.outputs.ipv4 }}/32,Description=${{ env.AWS_SG_DESCRIPTION }}}]"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION_PROD }}
+          AWS_SG_ID: ${{ secrets.SG }}
+          AWS_SG_PORT: 80
+          AWS_SG_DESCRIPTION: "Github Actions - delete"
+
+      - uses: whelk-io/maven-settings-xml-action@v20
+        with:
+          output_file: ./settings.xml
+          mirrors: ${{ env.mirrors }}
+          servers: ${{ env.servers }}
+          repositories: ${{ env.repositories }}
+        env:
+          mirrors: ${{ secrets.MIRRORS }}
+          servers: ${{ secrets.SERVERS }}
+          repositories: ${{ secrets.REPOSITORIES }}
+
+      - name: Setup variables..
+        id: var
+        run: |
+          if [ $GOAL == 'Deploy' ]
+          then
+            echo "::set-output name=REPO::nexus-snapshots"
+          else
+            echo "::set-output name=REPO::nexus-releases"
+          fi
+          VERSION=$( mvn --settings ./settings.xml org.apache.maven.plugins:maven-help-plugin:3.2.0:evaluate -Dexpression=project.version -q -DforceStdout | cut -f1 -d "-" )
+          GROUPID=$( mvn --settings ./settings.xml org.apache.maven.plugins:maven-help-plugin:3.2.0:evaluate -Dexpression=project.groupId -q -DforceStdout )
+          ARTIFACTID=$( mvn --settings ./settings.xml org.apache.maven.plugins:maven-help-plugin:3.2.0:evaluate -Dexpression=project.artifactId -q -DforceStdout )
+          groupId_m=${GROUPID//[.]//}
+          URL=$( mvn --settings ./settings.xml org.apache.maven.plugins:maven-help-plugin:3.2.0:evaluate -Dexpression=project.distributionManagement.repository.url -q -DforceStdout )
+          echo "::set-output name=version::v$VERSION"
+          echo "::set-output name=tag::$VERSION"
+          echo "::set-output name=groupid::$groupId_m"
+          echo "::set-output name=artifactid::$ARTIFACTID"
+          echo "::set-output name=url::$URL"
+        env:
+          GOAL: ${{ github.event.inputs.goal }}
+
+      - name: Tag Exists???
+        uses: mukunku/tag-exists-action@v1.0.0
+        id: checkTag
+        with: 
+          tag: ${{ steps.var.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checking for duplicate TAG...
+        id: display
+        run: |
+          if [ ${{ steps.checkTag.outputs.exists }} == 'true' ]
+          then
+            echo "[ ERROR ] Project Version Duplicated, please check the git tags."
+            exit 1
+          fi
+          
+      - name: Setup Java
+        uses: actions/setup-java@v1
+        with:
+          java-version: 1.8
+          server-id: ${{ steps.var.outputs.REPO }}
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+
+      - name: ${{ github.event.inputs.goal }} with Maven
+        id: maven
+        run: |
+          if [ $GOAL == 'Deploy' ]
+          then
+            mvn --settings ./settings.xml clean deploy
+          else
+            if curl --output /dev/null --silent --head --fail "$URL/$GROUPID/$ARTIFACTID/$TAG"
+            then
+              echo "[ ERROR ] Repository folder: $TAG, already exists, please fix this before proceeding."
+              exit 1
+            fi
+            git config user.email "action@github.com"
+            git config user.name "GitHub Action"
+            mvn --settings ./settings.xml -B release:clean
+            mvn --settings ./settings.xml -B release:prepare
+            mvn --settings ./settings.xml -B release:perform
+          fi
+        env:
+          MAVEN_USERNAME: ${{ secrets.NEXUS_USER }}
+          MAVEN_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          GOAL: ${{ github.event.inputs.goal }}
+          TAG: ${{ steps.var.outputs.tag }}
+          URL: ${{ steps.var.outputs.url }}
+          GROUPID: ${{ steps.var.outputs.groupid }}
+          ARTIFACTID: ${{ steps.var.outputs.artifactid }}
+
+      - name: Remove Github Actions IP from security group
+        if: always()
+        run: |
+          aws ec2 revoke-security-group-ingress --group-id ${{ env.AWS_SG_ID }} --protocol tcp --port ${{ env.AWS_SG_PORT }} --cidr ${{ steps.ip.outputs.ipv4 }}/32
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION_PROD }}
+          AWS_SG_ID: ${{ secrets.SG }}
+          AWS_SG_PORT: 80
