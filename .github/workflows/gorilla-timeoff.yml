@@ -60,4 +60,4 @@ jobs:
       env:
         KUBE_CONFIG_DATA: ${{ secrets.KUBECONFIG }}
       with:
-        command: helm upgrade timeoff ./k8s/timeoff/ --install --wait --atomic --set deployment.tag=${{ github.run_number }}
+        command: helm upgrade timeoff ./k8s/timeoff/ --install --wait --atomic --set image.tag=${{ github.run_number }}
