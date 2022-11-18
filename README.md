@@ -9,7 +9,7 @@ https://github.com/guerreroandres/gorillalogic
 4. A Helm Chart was created to deploy the app into k8s
 5. A GitHub Actions workflow was created to continuously deploy the app.
 
-The timeoff application gathere from https://github.com/timeoff-management/timeoff-management-application
+The timeoff application gathered from https://github.com/timeoff-management/timeoff-management-application
 such application is running on a container that was successfully tested locally, after this I decided
 to deploy the application in kubernetes using Helm Chart, so I created a new Helm Chart for this.
 I used the EKS service from AWS to deploy the application, not only the cluster but also the rest of resources
@@ -32,8 +32,9 @@ Following Infrastructure was built using terraform, following the next folder st
     - EKS
     - VPC
     - ECR
+    If the infrastructure is going to build on another AWS account please change the "aws-account" terraform variable on both folders.
 
-After all since the code is hosted on GitHub I decided to create a GitHub Actions Workflow to deploy the app
+After all, since the code is hosted on GitHub I decided to create a GitHub Actions Workflow to deploy the app
 automatically at every push or PR to the main branch, this workflow contains two jobs:
 - Build: Here the docker image is built and pushed to the ECR repo.
 - Deploy: The uploaded image is deployed into the kubernetes cluster using helm.
